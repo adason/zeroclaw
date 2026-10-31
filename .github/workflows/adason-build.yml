@@ -1,0 +1,71 @@
+name: adason browser-native build
+
+# Builds zeroclaw with the OFFICIAL feature set (the generated
+# ZEROCLAW_CARGO_FLAGS in Dockerfile.debian, parsed at build time so it can
+# never drift from upstream) PLUS browser-native — the rust_native browser
+# backend that drives the external browserless container.
+#
+# Tags (GHCR, public, pulled anonymously by the Synology NAS):
+#   :latest   — moves on every main push (i.e. every upstream sync)
+#   :sha-<sha>— immutable per commit
+#   :vX.Y.Z   — only when a v* tag is pushed (manual pinning)
+#
+# amd64 only: the sole consumer is an x86_64 NAS.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: adason-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/adason/zeroclaw
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Resolve feature flags (official set + browser-native)
+        id: flags
+        run: |
+          set -euo pipefail
+          base="$(sed -n 's/^ARG ZEROCLAW_CARGO_FLAGS="\([^"]*\)".*/\1/p' Dockerfile.debian | head -1)"
+          [ -n "$base" ] || { echo "::error title=flags::could not parse generated ZEROCLAW_CARGO_FLAGS from Dockerfile.debian"; exit 1; }
+          case "$base" in
+            *browser-native*) ext="$base" ;;
+            *) ext="$base,browser-native" ;;
+          esac
+          printf 'CARGO_FLAGS=%s\n' "$ext" >> "$GITHUB_ENV"
+          echo "building with: $ext"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build and push
+        uses: docker/build-push-action@1dc73863535b631f98b2378be8619f83b136f4a0 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile.debian
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            ZEROCLAW_CARGO_FLAGS=${{ env.CARGO_FLAGS }}
+            ZEROCLAW_BUILD_ID=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}', env.IMAGE, github.ref_name) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

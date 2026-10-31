@@ -1,0 +1,57 @@
+name: adason sync upstream
+
+# Keeps this fork's main in lockstep with the zeroclaw-labs/zeroclaw default
+# branch (master today; main if upstream ever renames). No-ops when already
+# up to date, so the hourly schedule costs nothing. A merge push to main
+# triggers the "adason browser-native build" workflow, which moves :latest.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream default branch
+        run: |
+          set -e
+          git remote add upstream https://github.com/zeroclaw-labs/zeroclaw.git
+          # Resolve upstream's default branch dynamically; tolerate either
+          # master (current) or main (post-rename) — prefer whichever exists.
+          git fetch upstream 'refs/heads/master:refs/remotes/upstream/master' \
+                            'refs/heads/main:refs/remotes/upstream/main' || true
+          UPSTREAM_REF=""
+          for c in upstream/master upstream/main; do
+            if git rev-parse --verify -q "$c" >/dev/null; then UPSTREAM_REF="$c"; break; fi
+          done
+          [ -n "$UPSTREAM_REF" ] || { echo "::error title=sync::neither upstream master nor main found"; exit 1; }
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$UPSTREAM_REF")" ]; then
+            echo "main already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git merge --no-ff --no-edit "$UPSTREAM_REF" -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into main"; then
+            # The only expected conflicts are modify/delete on .github files
+            # this fork intentionally dropped. Re-assert our deletions;
+            # anything else is a real conflict and must fail loudly.
+            git diff --name-only --diff-filter=U | while read -r p; do
+              case "$p" in
+                .github/*) git rm -q -- "$p" ;;
+                *) echo "::error title=unexpected conflict::$p"; exit 1 ;;
+              esac
+            done
+            git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into main (drop removed .github files)"
+          fi
+          git push origin HEAD:main
