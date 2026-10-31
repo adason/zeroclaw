@@ -92,6 +92,9 @@ jobs:
         with:
           context: .
           file: Dockerfile.agent-browser
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
           push: true
           platforms: linux/amd64
           build-args: |
