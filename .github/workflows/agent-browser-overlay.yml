@@ -1,0 +1,93 @@
+name: Agent-browser overlay
+
+# Thin overlay on the OFFICIAL zeroclaw debian image: adds the prebuilt
+# agent-browser binary (vercel-labs release) so the agent_browser backend can
+# drive an external browser container via remote CDP (AGENT_BROWSER_CDP env,
+# set where the agent is deployed). No rust rebuild — the binary is a
+# prebuilt static artifact from vercel-labs/agent-browser releases.
+#
+# Triggers: a new stable upstream release tag propagated by the sync workflow
+# (base = official :debian-<release> image), or manual dispatch.
+#
+# Tags (GHCR, public — pulled anonymously by the deployment host):
+#   :latest   — moves on each overlay build
+#   :debian   — always the debian variant, for pinning
+#   :vX.Y.Z-debian — on release-tag builds (matches the upstream release tag scheme)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: "Base image (default: official zeroclaw :debian)"
+        required: false
+        default: "ghcr.io/zeroclaw-labs/zeroclaw:debian"
+      agent_browser_version:
+        description: "agent-browser release tag (default: latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: agent-browser-overlay
+  cancel-in-progress: false
+
+env:
+  # Resolves to ghcr.io/<owner>/<repo> (lowercased) — fork-agnostic.
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve inputs
+        id: inputs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            base="ghcr.io/zeroclaw-labs/zeroclaw:${GITHUB_REF_NAME}-debian"
+            tag="${GITHUB_REF_NAME}-debian"
+          else
+            base="${{ inputs.base_image }}"
+            tag=""
+          fi
+          printf 'BASE_IMAGE=%s\n' "$base" >> "$GITHUB_ENV"
+          printf 'RELEASE_TAG=%s\n' "$tag" >> "$GITHUB_ENV"
+          echo "base=$base tag=$tag"
+
+      - name: Download agent-browser (linux-x64)
+        run: |
+          set -euo pipefail
+          v="${{ inputs.agent_browser_version }}"
+          if [ "$v" = "latest" ]; then
+            v="$(curl -fsSL https://api.github.com/repos/vercel-labs/agent-browser/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
+          fi
+          echo "agent-browser: $v"
+          curl -fL --retry 3 -o agent-browser \
+            "https://github.com/vercel-labs/agent-browser/releases/download/${v}/agent-browser-linux-x64"
+          printf 'AB_VERSION=%s\n' "$v" >> "$GITHUB_ENV"
+          file agent-browser || true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build and push overlay
+        uses: docker/build-push-action@1dc73863535b631f98b2378be8619f83b136f4a0 # v6.18.0
+        with:
+          context: .
+          file: Dockerfile.agent-browser
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            BASE_IMAGE=${{ env.BASE_IMAGE }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:debian
+            ${{ env.RELEASE_TAG != '' && format('{0}:{1}', env.IMAGE, env.RELEASE_TAG) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

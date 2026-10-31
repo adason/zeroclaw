@@ -1,9 +1,10 @@
-name: adason sync upstream
+name: Sync upstream
 
-# Keeps this fork's master in lockstep with the zeroclaw-labs/zeroclaw default
-# branch (master today; main if upstream ever renames). No-ops when already
-# up to date, so the hourly schedule costs nothing. A merge push to master
-# triggers the "adason browser-native build" workflow, which moves :latest.
+# Keeps this fork's default branch in lockstep with its upstream parent's
+# default branch (resolved via the GitHub API, so a parent rename or a new
+# fork keeps working). No-ops when already up to date, so the hourly
+# schedule costs nothing. A merge push moves the fork head, and any new
+# stable release tags are propagated — tag pushes fire the image build.
 
 on:
   schedule:
@@ -18,16 +19,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout master (full history)
+      - name: Checkout default branch (full history)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: master
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
       - name: Merge upstream default branch
         run: |
           set -e
-          git remote add upstream https://github.com/zeroclaw-labs/zeroclaw.git
+          # Resolve the fork's parent so the workflow is fork-agnostic.
+          parent="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}" | jq -r '.parent.full_name // empty')"
+          if [ -z "$parent" ]; then
+            echo "repository is not a fork; nothing to sync"; exit 0
+          fi
+          echo "syncing from $parent"
+          git remote add upstream "https://github.com/${parent}.git"
           # Resolve upstream's default branch dynamically; tolerate either
           # master (current) or main (post-rename) — prefer whichever exists.
           git fetch upstream 'refs/heads/master:refs/remotes/upstream/master' \
@@ -36,13 +44,15 @@ jobs:
           for c in upstream/master upstream/main; do
             if git rev-parse --verify -q "$c" >/dev/null; then UPSTREAM_REF="$c"; break; fi
           done
-          [ -n "$UPSTREAM_REF" ] || { echo "::error title=sync::neither upstream master nor main found"; exit 1; }
+          if [ -z "$UPSTREAM_REF" ]; then
+            echo "::error title=sync::neither upstream master nor main found"; exit 1
+          fi
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$UPSTREAM_REF")" ]; then
-            echo "master already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
+            echo "head already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git merge --no-ff --no-edit "$UPSTREAM_REF" -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into master"; then
+          if ! git merge --no-ff --no-edit "$UPSTREAM_REF" -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into ${GITHUB_REF_NAME#refs/heads/}"; then
             # The only expected conflicts are modify/delete on .github files
             # this fork intentionally dropped. Re-assert our deletions;
             # anything else is a real conflict and must fail loudly.
@@ -52,13 +62,13 @@ jobs:
                 *) echo "::error title=unexpected conflict::$p"; exit 1 ;;
               esac
             done
-            git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into master (drop removed .github files)"
+            git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} (drop removed .github files)"
           fi
-          git push origin HEAD:master
+          git push origin "HEAD:refs/heads/${GITHUB_REF_NAME#refs/heads/}"
 
       - name: Propagate new upstream release tags
         # Build trigger: a new stable upstream release (vX.Y.Z) lands as a tag
-        # on this fork, which fires the "adason browser-native build" workflow.
+        # on this fork, which fires the image build workflow.
         run: |
           set -e
           git fetch --tags upstream
@@ -67,8 +77,8 @@ jobs:
           for t in $(git tag -l 'v*'); do
             echo "$t" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || continue   # stable only
             if echo "$fork_tags" | grep -qx "$t"; then continue; fi        # already in fork
-            # The release must be contained in the synced master we just merged.
-            git merge-base --is-ancestor "$t^{commit}" HEAD && new_tags="$new_tags $t" || echo "WARN: tag $t not an ancestor of master, skipping"
+            # The release must be contained in the synced head we just merged.
+            git merge-base --is-ancestor "$t^{commit}" HEAD && new_tags="$new_tags $t" || echo "WARN: tag $t not an ancestor of the synced head, skipping"
           done
           if [ -z "$new_tags" ]; then
             echo "no new stable release tags"

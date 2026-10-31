@@ -1,0 +1,11 @@
+# adason overlay: official zeroclaw image + agent-browser CLI.
+#
+# The agent_browser backend drives the external browserless container via
+# remote CDP (AGENT_BROWSER_CDP env, set in compose). No rust rebuild needed —
+# agent-browser is a prebuilt static Rust binary from vercel-labs releases.
+#
+# Build context: the sibling `agent-browser` binary file (see the agent-browser-overlay workflow).
+FROM ${BASE_IMAGE}
+
+COPY agent-browser /usr/local/bin/agent-browser
+RUN chmod 755 /usr/local/bin/agent-browser
