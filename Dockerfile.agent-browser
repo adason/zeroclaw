@@ -8,5 +8,6 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-COPY agent-browser /usr/local/bin/agent-browser
-RUN chmod 755 /usr/local/bin/agent-browser
+# --chmod: the runtime image builds as non-root, so a follow-up RUN chmod is
+# not permitted; buildkit applies the mode at copy time instead.
+COPY --chmod=755 agent-browser /usr/local/bin/agent-browser
