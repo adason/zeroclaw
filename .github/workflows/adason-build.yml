@@ -6,7 +6,7 @@ name: adason browser-native build
 # backend that drives the external browserless container.
 #
 # Tags (GHCR, public, pulled anonymously by the Synology NAS):
-#   :latest   — moves on every main push (i.e. every upstream sync)
+#   :latest   — moves on every master push (i.e. every upstream sync)
 #   :sha-<sha>— immutable per commit
 #   :vX.Y.Z   — only when a v* tag is pushed (manual pinning)
 #
@@ -14,7 +14,7 @@ name: adason browser-native build
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*"]
   workflow_dispatch: {}
 

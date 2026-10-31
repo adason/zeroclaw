@@ -1,8 +1,8 @@
 name: adason sync upstream
 
-# Keeps this fork's main in lockstep with the zeroclaw-labs/zeroclaw default
+# Keeps this fork's master in lockstep with the zeroclaw-labs/zeroclaw default
 # branch (master today; main if upstream ever renames). No-ops when already
-# up to date, so the hourly schedule costs nothing. A merge push to main
+# up to date, so the hourly schedule costs nothing. A merge push to master
 # triggers the "adason browser-native build" workflow, which moves :latest.
 
 on:
@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout main (full history)
+      - name: Checkout master (full history)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          ref: master
           fetch-depth: 0
 
       - name: Merge upstream default branch
@@ -38,11 +38,11 @@ jobs:
           done
           [ -n "$UPSTREAM_REF" ] || { echo "::error title=sync::neither upstream master nor main found"; exit 1; }
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$UPSTREAM_REF")" ]; then
-            echo "main already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
+            echo "master already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git merge --no-ff --no-edit "$UPSTREAM_REF" -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into main"; then
+          if ! git merge --no-ff --no-edit "$UPSTREAM_REF" -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into master"; then
             # The only expected conflicts are modify/delete on .github files
             # this fork intentionally dropped. Re-assert our deletions;
             # anything else is a real conflict and must fail loudly.
@@ -52,6 +52,6 @@ jobs:
                 *) echo "::error title=unexpected conflict::$p"; exit 1 ;;
               esac
             done
-            git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into main (drop removed .github files)"
+            git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into master (drop removed .github files)"
           fi
-          git push origin HEAD:main
+          git push origin HEAD:master
