@@ -5,6 +5,7 @@
 # agent-browser is a prebuilt static Rust binary from vercel-labs releases.
 #
 # Build context: the sibling `agent-browser` binary file (see the agent-browser-overlay workflow).
+ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 COPY agent-browser /usr/local/bin/agent-browser
