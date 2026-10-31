@@ -5,16 +5,19 @@ name: adason browser-native build
 # never drift from upstream) PLUS browser-native — the rust_native browser
 # backend that drives the external browserless container.
 #
+# Triggers: a new stable upstream release tag (vX.Y.Z) propagated by the
+# "adason sync upstream" workflow — i.e. builds happen per upstream RELEASE,
+# not per sync commit. Manual rebuilds via workflow_dispatch.
+#
 # Tags (GHCR, public, pulled anonymously by the Synology NAS):
-#   :latest   — moves on every master push (i.e. every upstream sync)
-#   :sha-<sha>— immutable per commit
-#   :vX.Y.Z   — only when a v* tag is pushed (manual pinning)
+#   :latest   — moves on each release build
+#   :sha-<sha>— immutable per build
+#   :vX.Y.Z   — the release this build was triggered by
 #
 # amd64 only: the sole consumer is an x86_64 NAS.
 
 on:
   push:
-    branches: [master]
     tags: ["v*"]
   workflow_dispatch: {}
 
@@ -22,9 +25,11 @@ permissions:
   contents: read
   packages: write
 
+# Serial queue (no cancel): if a sync pushes several release tags at once,
+# builds run oldest→newest and :latest settles on the newest release.
 concurrency:
-  group: adason-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: adason-build
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/adason/zeroclaw

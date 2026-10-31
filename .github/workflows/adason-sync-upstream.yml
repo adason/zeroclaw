@@ -55,3 +55,24 @@ jobs:
             git commit --no-edit -m "sync: merge upstream ${UPSTREAM_REF#upstream/} into master (drop removed .github files)"
           fi
           git push origin HEAD:master
+
+      - name: Propagate new upstream release tags
+        # Build trigger: a new stable upstream release (vX.Y.Z) lands as a tag
+        # on this fork, which fires the "adason browser-native build" workflow.
+        run: |
+          set -e
+          git fetch --tags upstream
+          fork_tags="$(git ls-remote --tags origin | sed 's|.*refs/tags/||')"
+          new_tags=""
+          for t in $(git tag -l 'v*'); do
+            echo "$t" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || continue   # stable only
+            if echo "$fork_tags" | grep -qx "$t"; then continue; fi        # already in fork
+            # The release must be contained in the synced master we just merged.
+            git merge-base --is-ancestor "$t^{commit}" HEAD && new_tags="$new_tags $t" || echo "WARN: tag $t not an ancestor of master, skipping"
+          done
+          if [ -z "$new_tags" ]; then
+            echo "no new stable release tags"
+          else
+            echo "pushing release tags:$new_tags"
+            git push origin $new_tags
+          fi
