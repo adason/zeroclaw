@@ -84,6 +84,13 @@ jobs:
           printf 'AB_VERSION=%s\n' "$v" >> "$GITHUB_ENV"
           file agent-browser || true
 
+      - name: Log in to GHCR
+        # Version-proof auth: the docker CLI config persists for the job, so
+        # the build action (any major) pushes with it.
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
+            -u "${GITHUB_ACTOR}" --password-stdin
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -92,9 +99,6 @@ jobs:
         with:
           context: .
           file: Dockerfile.agent-browser
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
           push: true
           platforms: linux/amd64
           build-args: |
