@@ -29,23 +29,27 @@ jobs:
         run: |
           set -e
           # Resolve the fork's parent so the workflow is fork-agnostic.
-          parent="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}" | jq -r '.parent.full_name // empty')"
+          parent_repo="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}")"
+          parent="$(jq -r '.parent.full_name // empty' <<<"$parent_repo")"
           if [ -z "$parent" ]; then
             echo "repository is not a fork; nothing to sync"; exit 0
           fi
-          echo "syncing from $parent"
+          upstream_default="$(jq -r '.parent.default_branch // empty' <<<"$parent_repo")"
+          echo "syncing from $parent (declared default: ${upstream_default:-unknown})"
           git remote add upstream "https://github.com/${parent}.git"
-          # Resolve upstream's default branch dynamically; tolerate either
-          # master (current) or main (post-rename) — prefer whichever exists.
-          git fetch upstream 'refs/heads/master:refs/remotes/upstream/master' \
-                            'refs/heads/main:refs/remotes/upstream/main' || true
+          # Fetch candidate branches one at a time: a multi-refspec fetch is
+          # atomic, so one missing ref (e.g. `main` after a rename) aborts
+          # the whole fetch — including the ref that does exist.
+          # Prefer the parent's declared default branch, then legacy names.
           UPSTREAM_REF=""
-          for c in upstream/master upstream/main; do
-            if git rev-parse --verify -q "$c" >/dev/null; then UPSTREAM_REF="$c"; break; fi
+          for b in "${upstream_default:-none}" master main; do
+            [ "$b" = "none" ] && continue
+            git fetch -q upstream "refs/heads/$b:refs/remotes/upstream/$b" 2>/dev/null || true
+            if git rev-parse --verify -q "upstream/$b" >/dev/null; then UPSTREAM_REF="upstream/$b"; break; fi
           done
           if [ -z "$UPSTREAM_REF" ]; then
-            echo "::error title=sync::neither upstream master nor main found"; exit 1
+            echo "::error title=sync::no upstream branch found (tried: ${upstream_default:-?}, master, main)"; exit 1
           fi
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$UPSTREAM_REF")" ]; then
             echo "head already at ${UPSTREAM_REF#upstream/} ($(git rev-parse --short "$UPSTREAM_REF"))"; exit 0
