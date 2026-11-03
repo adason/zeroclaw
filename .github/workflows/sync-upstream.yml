@@ -13,10 +13,6 @@ on:
 
 permissions:
   contents: write
-  # Tag pushes land upstream release commits that contain .github/workflows
-  # files; without actions:write GitHub refuses the push (its error names
-  # the nonexistent `workflows` permission — the real key is `actions`).
-  actions: write
 
 jobs:
   sync:
@@ -81,16 +77,30 @@ jobs:
           set -e
           git fetch --tags upstream
           fork_tags="$(git ls-remote --tags origin | sed 's|.*refs/tags/||')"
-          new_tags=""
-          for t in $(git tag -l 'v*'); do
+          latest_tag=""
+          for t in $(git tag -l 'v*' | sort -V); do
             echo "$t" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || continue   # stable only
             if echo "$fork_tags" | grep -qx "$t"; then continue; fi        # already in fork
             # The release must be contained in the synced head we just merged.
-            git merge-base --is-ancestor "$t^{commit}" HEAD && new_tags="$new_tags $t" || echo "WARN: tag $t not an ancestor of the synced head, skipping"
+            git merge-base --is-ancestor "$t^{commit}" HEAD \
+              || { echo "WARN: tag $t not an ancestor of the synced head, skipping"; continue; }
+            latest_tag="$t"   # ascending order: keep only the highest
           done
-          if [ -z "$new_tags" ]; then
+          if [ -z "$latest_tag" ]; then
             echo "no new stable release tags"
+          elif [ -n "$TAG_PUSH_TOKEN" ]; then
+            # Only the newest release is propagated: each tag push fires the
+            # overlay build, and backfilling historical tags would trigger
+            # one build per old release.
+            echo "pushing latest new release tag: $latest_tag"
+            git push "https://x-access-token:${TAG_PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}" "$latest_tag"
           else
-            echo "pushing release tags:$new_tags"
-            git push origin $new_tags
+            # GitHub refuses a GITHUB_TOKEN push of a tag whose commit
+            # touches .github/workflows (GitHub App guard; no permissions
+            # key lifts it for user-owned repos). Set repo secret
+            # TAG_PUSH_TOKEN (fine-grained PAT, Contents read+write on
+            # this repo only) for fully automatic propagation; until then
+            # a machine with user credentials does:
+            #   git fetch --tags upstream && git push origin $latest_tag
+            echo "::warning title=sync::new release tag needs manual push:$latest_tag"
           fi
