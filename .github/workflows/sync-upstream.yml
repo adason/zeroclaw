@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: write
+  # Tag pushes land upstream release commits that contain .github/workflows
+  # files; without this, GitHub refuses the push for a GitHub App token.
+  workflows: write
 
 jobs:
   sync:
