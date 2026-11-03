@@ -14,8 +14,9 @@ on:
 permissions:
   contents: write
   # Tag pushes land upstream release commits that contain .github/workflows
-  # files; without this, GitHub refuses the push for a GitHub App token.
-  workflows: write
+  # files; without actions:write GitHub refuses the push (its error names
+  # the nonexistent `workflows` permission — the real key is `actions`).
+  actions: write
 
 jobs:
   sync:
